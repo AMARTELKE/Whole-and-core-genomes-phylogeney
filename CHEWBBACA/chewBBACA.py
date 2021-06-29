@@ -643,8 +643,9 @@ def test_schema():
         # simple command to evaluate genome quality
         simple_cmd = ('chewBBACA.py TestGenomeQuality -i <input_file> '
                       '-n <max_iteration> '
-                      '-t <max_threshold>'
-                      '-s <step>')
+                      '-t <max_threshold> '
+                      '-s <step> '
+                      '-o <output_directory>')
 
         usage_msg = (
             '\nEvaluate genome quality with default parameters:\n  {0}\n'.format(simple_cmd))
@@ -666,24 +667,27 @@ def test_schema():
 
     parser.add_argument('-n', '--max-iteration', type=int,
                         required=True, dest='max_iteration',
-                        help='Maximum number of iterations.')
+                        help='Maximum number of iterations per threshold. '
+                             'Several iterations might be necessary to get '
+                             'stable values for the number of present genes '
+                             'and number of genomes used.')
 
-    parser.add_argument('-t', '--max-threshold', type=int,
-                        required=True, dest='max_threshold',
-                        help='Maximum threshold of bad calls above 95 percent.')
+    parser.add_argument('-t', '--missing-loci-threshold', type=int,
+                        required=True, dest='missing_loci_threshold',
+                        help='Threshold value for the maximum number of '
+                             'missing genes per genome.')
 
     parser.add_argument('-s', '--step', type=int,
                         required=True, dest='step',
-                        help='Step between each threshold analysis.')
+                        help='Step between each threshold analysis. '
+                             'The process will start with a threshold '
+                             'value of 0 and will increment the threshold '
+                             'value based on this step value.')
 
     parser.add_argument('-o', '--output-directory', type=str,
                         required=False, default='.', dest='output_directory',
                         help='Path to the output directory that will '
                              'store output files')
-
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        default=False, dest='verbose',
-                        help='Increase stdout verbosity.')
 
     args = parser.parse_args()
     del args.TestGenomeQuality
