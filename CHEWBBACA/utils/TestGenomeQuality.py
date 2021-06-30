@@ -4,7 +4,13 @@
 Purpose
 -------
 
-This module ...
+This module contains functions to evaluate the impact of each genome
+assembly on the number of loci that constitute the core-genome. The
+impact of each genome is evaluated based on a threshold of missing
+loci that is progressively increased to include genomes with more
+missing loci and determine the impact of the inclusion of those genomes
+in the core-genome. The process reports the number of loci that constitute
+the core-genome at several thresholds of loci presence.
 
 Code documentation
 ------------------
@@ -16,16 +22,16 @@ import argparse
 from copy import deepcopy
 from itertools import chain
 
-import plotly
-import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 
 try:
-    from utils import (file_operations as fo,
+    from utils import (plotting as plt,
+                       file_operations as fo,
                        matrix_manipulation as mm)
 except:
-    from CHEWBBACA.utils import (file_operations as fo,
+    from CHEWBBACA.utils import (plotting as plt,
+                                 file_operations as fo,
                                  matrix_manipulation as mm)
 
 
@@ -99,65 +105,12 @@ def presence_absence_iterator(matrix, threshold):
               (cgMLST_100, len(cgMLST_100)),
               exclude_genomes]
 
-    return [exclude_genomes, vector]
-
-
-def scatter_tracer(x_data, y_data, tracer_name, tracer_mode,
-                   ref_yaxis, marker_symbol, marker_size,
-                   marker_color, line_dash):
-    """ Creates a tracer object for a scatter plot.
-
-        Parameters
-        ----------
-        x_data : list
-            xaxis values corresponding to the maximum
-            number of missing genes threshold values.
-        y_data : list
-            yaxis values corresponding to either the
-            number of genomes included in the analysis
-            at each threshold or to the number of genes
-            present in 95%, 99%, 99.5%, or 100% of the
-            genomes at each threshold.
-        tracer_name : str
-            name to show in the plot legend.
-        tracer_mode : str
-            type of symbols used used to represent data
-            (lines, markers, lines+markers...).
-        ref_yaxis : str
-            the yaxis that will be used as reference.
-        marker_symbol : str
-            the type of symbol used for the markers.
-        marker_size : int
-            the size of the marker symbol.
-        marker_color : str
-            color of the markers and of the line (if any).
-        line_dash : str
-            type of line (solid, dash...).
-
-        Returns
-        -------
-        tracer : plotly.graph_objs.Scatter
-            a Plotly tracer with the data for a scatter
-            plot (a group of data points).
-    """
-
-    tracer = go.Scatter(x=x_data,
-                        y=y_data,
-                        name=tracer_name,
-                        mode=tracer_mode,
-                        yaxis=ref_yaxis,
-                        marker=dict(symbol=marker_symbol,
-                                    size=marker_size,
-                                    color=marker_color),
-                        line=dict(dash=line_dash)
-                        )
-
-    return tracer
+    return vector
 
 
 input_file = '/home/rfm/Desktop/rfm/bugfixing/chewBBACA_tutorial/chewBBACA_tutorial_copy/cgMLST_all.tsv'
-missing_loci_threshold = 290
-step = 50
+missing_loci_threshold = 300
+step = 5
 output_directory = '/home/rfm/Desktop/rfm/bugfixing/chewBBACA_tutorial/chewBBACA_tutorial_copy/novel_TestGenomeQuality'
 def main(input_file, missing_loci_threshold, step, output_directory):
 
@@ -188,10 +141,21 @@ def main(input_file, missing_loci_threshold, step, output_directory):
               '{0}/{1}'.format(threshold, threshold_list[-1]),
               end='')
 
-        removed_genomes, vector = presence_absence_iterator(presence_absence,
-                                                            threshold)
+        vector = presence_absence_iterator(presence_absence, threshold)
 
         results.append(vector)
+
+    # create file with excluded genomes per threshold
+    removed_genomes = [(threshold_list[i], res[-1])
+                       for i, res in enumerate(results)]
+
+    lines = ['{0}\t{1}'.format(r[0], ' '.join(r[1])) for r in removed_genomes]
+    header = 'Threshold\tRemoved_genomes'
+    lines = '\n'.join([header]+lines)
+    removed_genomes_oufile = os.path.join(output_directory,
+                                          'removedGenomes.tsv')
+    with open(removed_genomes_oufile, 'w') as outfile:
+        outfile.write(lines+'\n')
 
     # plot legend labels
     labels = ['Genomes used',
@@ -221,26 +185,18 @@ def main(input_file, missing_loci_threshold, step, output_directory):
     for d in range(len(y_datasets)):
         # tracer with used genomes data
         if d == 0:
-            tracer = scatter_tracer(x_data,
-                                    y_datasets[d],
-                                    labels[d],
-                                    'lines+markers',
-                                    'y2',
-                                    'diamond-dot',
-                                    10,
-                                    colors[d],
-                                    'solid')
+            tracer = plt.scatter_tracer(x_data, y_datasets[d],
+                                        labels[d], 'lines+markers',
+                                        'y2', 'diamond-dot',
+                                        10, colors[d],
+                                        'solid')
         # tracers for number of genes per threshold
         else:
-            tracer = scatter_tracer(x_data,
-                                    y_datasets[d],
-                                    labels[d],
-                                    'lines+markers',
-                                    'y1',
-                                    'circle',
-                                    10,
-                                    colors[d],
-                                    'dash')
+            tracer = plt.scatter_tracer(x_data, y_datasets[d],
+                                        labels[d], 'lines+markers',
+                                        'y1', 'circle',
+                                        10, colors[d],
+                                        'dash')
 
         tracers.append(tracer)
 
@@ -276,13 +232,15 @@ def main(input_file, missing_loci_threshold, step, output_directory):
                            plot_bgcolor='#EBEBEB'
                            )
 
-    fig = go.Figure(data=tracers, layout=fig_layout)
+    fig = plt.create_figure(tracers, fig_layout)
     plot_file = os.path.join(output_directory, 'GenomeQualityPlot.html')
-    plotly.offline.plot(fig, filename=plot_file, auto_open=False)
+    plt.plot_figure(fig, plot_file)
 
     print('\nResults available at: {0}'.format(output_directory))
 
 
+#################################################
+# add argument to define loci presence thresholds
 def parse_arguments():
 
     parser = argparse.ArgumentParser(description=__doc__,
