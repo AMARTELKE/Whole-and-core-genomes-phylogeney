@@ -142,12 +142,16 @@ def process_timer(func):
         # get process name and print header
         pv.process_header(sys.argv[1])
 
-        start = get_datetime()
-        start_str = datetime_str(start)
-        print('Started at: {0}\n'.format(start_str))
+        if sys.argv[2] != '-h':
+            start = get_datetime()
+            start_str = datetime_str(start)
+            print('Started at: {0}\n'.format(start_str))
+
         # run function
         func(*args, **kwargs)
 
+        # this will not run if '-h' is provided and does
+        # not need to be indented
         end = get_datetime()
         end_str = datetime_str(end)
         print('\nFinished at: {0}'.format(end_str))

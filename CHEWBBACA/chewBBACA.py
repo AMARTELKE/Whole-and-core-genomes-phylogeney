@@ -642,8 +642,7 @@ def test_schema():
     def msg(name=None):
         # simple command to evaluate genome quality
         simple_cmd = ('chewBBACA.py TestGenomeQuality -i <input_file> '
-                      '-n <max_iteration> '
-                      '-t <max_threshold> '
+                      '-t <missing_loci_threshold> '
                       '-s <step> '
                       '-o <output_directory>')
 
@@ -664,13 +663,6 @@ def test_schema():
     parser.add_argument('-i', '--input-file', type=str,
                         required=True, dest='input_file',
                         help='Path to file with a matrix of allelic profiles.')
-
-    parser.add_argument('-n', '--max-iteration', type=int,
-                        required=True, dest='max_iteration',
-                        help='Maximum number of iterations per threshold. '
-                             'Several iterations might be necessary to get '
-                             'stable values for the number of present genes '
-                             'and number of genomes used.')
 
     parser.add_argument('-t', '--missing-loci-threshold', type=int,
                         required=True, dest='missing_loci_threshold',

@@ -14,60 +14,22 @@ Code documentation
 import os
 import argparse
 from copy import deepcopy
-from collections import Counter
+from itertools import chain
 
 import plotly
 import numpy as np
+import pandas as pd
 import plotly.graph_objs as go
 
-
-def presence_absence_matrix(matrix):
-    """ Converts a matrix from the AlleleCall process
-        into a Presence(1)/Absence(0) matrix.
-
-        Parameters
-        ----------
-        matrix : numpy.ndarray
-            Array with the profiles determined by the
-            AlleleCall process of chewBBACCA.
-
-        Returns
-        -------
-        binary_matrix : numpy.ndarray
-            Array with valid allele identifiers (any allele
-            integer identifier, including inferred) converted
-            to 1 and missing values (LNF, ASM, ALM, PLOT3,
-            PLOT5, ...) converted to 0.
-    """
-
-    binary_matrix = deepcopy(matrix)
-
-    row = 1
-    total_rows = binary_matrix.shape[0]
-    total_cols = binary_matrix.shape[1]
-    while row < total_rows:
-        column = 1
-        while column < total_cols:
-            current = binary_matrix[row, column]
-            # convert to integer and change to
-            # presence(1)/absence(0)
-            try:
-                binary_matrix[row, column] = \
-                    1 if int(current) > 0 else 0
-            # if it cannot be converted to an integer
-            # it is either an inferred allele or
-            # missing data
-            except ValueError:
-                binary_matrix[row, column] = \
-                    1 if 'INF-' in current else 0
-
-            column += 1
-        row += 1
-
-    return binary_matrix
+try:
+    from utils import (file_operations as fo,
+                       matrix_manipulation as mm)
+except:
+    from CHEWBBACA.utils import (file_operations as fo,
+                                 matrix_manipulation as mm)
 
 
-def presence_absence_iterator(matrix, threshold, vector):
+def presence_absence_iterator(matrix, threshold):
     """ Determines the number of genes present in 0%, 95%, 99%,
         99.5% and 100% of genomes, excluding the genomes that
         have a number of missing genes greater than a defined
@@ -84,16 +46,6 @@ def presence_absence_iterator(matrix, threshold, vector):
             with a number of missing genes above this threshold
             will be excluded from the calculations to determine
             the number of present genes.
-        vector : list
-            List with 7 sublists. The sublists will store
-            (in order): number of genomes included in the
-            calculation of present genes (respect the missing
-            genes threshold), number of genes present in 95%
-            of the genomes, number of genes present in 99% of
-            the genomes, number of genes present in 99.5% of
-            the genomes, number of genes present in 0% of the
-            genomes, number of genomes excluded from the analysis
-            and number of genes present in 100%  of the genomes.
 
         Returns
         -------
@@ -103,251 +55,51 @@ def presence_absence_iterator(matrix, threshold, vector):
         vector : list
             Updated vector with the results for the current
             threshold.
-        present_genes : list
-            Identifiers of genes that are present in at least
-            95% of the genomes.
     """
 
     iteration_matrix = deepcopy(matrix)
 
-    genomes = iteration_matrix[1:, :1]
-
-    # this list includes 'FILE' header from matrix
-    genes = iteration_matrix[0]
-
-    column = 1
-    totals = []
-    # stores list of genomes that had a number of missing loci
-    # greater than the threshold
-    exclude_genomes = []
     # stores genes that were not in any of the genomes
     # stores genes that were in all genomes
-    genes_0 = []
-    genes_95 = 0
-    genes_99 = 0
-    genes_995 = 0
-    genes_100 = []
-    present_genes = []
 
-    # iterate over all loci columns
-    total_rows = iteration_matrix.shape[0]
-    total_cols = iteration_matrix.shape[1]
-    while column < total_cols:
-        # start at row of first genome
-        # row 0 is 'FILE'
-        row = 1
-        missing_genes = 0
-        genome_miss = []
-        # iterate over genomes rows for each locus column
-        while row < total_rows:
-            current_cell = int(iteration_matrix[row, column])
-            # if cell value is '0', the gene was not found in
-            # that genome
-            if current_cell == 0:
-                # increment number of times gene is not found
-                missing_genes += 1
-                # store genome index as bad genome (does not
-                # have the gene)
-                genome_miss.append(genomes[int(row - 1)][0])
+    # determine genomes with number of missing loci above threshold
+    missing = mm.missing_data_table(iteration_matrix)
+    # select identifiers for genomes with missing loci above threshold
+    exclude_genomes = missing.index[missing['missing'] > threshold].tolist()
+    # remove genomes above threshold
+    iteration_matrix = mm.remove_genomes(iteration_matrix, exclude_genomes)
 
-            # increment to check next genome
-            row += 1
+    genomes = list(iteration_matrix.index)
 
-        # after iterating over all rows/genomes for a locus column
+    # this list includes 'FILE' header from matrix
+    genes = list(iteration_matrix.columns)
+
+    # determine cgMLST values
+    genes_values = {}
+    for g in genes:
+        # get values counts
+        presence_absence_counts = iteration_matrix[g].value_counts()
+        total_presences = presence_absence_counts.get(1, 0)
+        total_absences = presence_absence_counts.get(0, 0)
+
         # calculate percentage of genomes that have the locus
-        gene_presence = float((total_rows-1) - missing_genes) / float(total_rows-1)
+        gene_presence = float(len(genomes) - total_absences) / len(genomes)
+        genes_values[g] = gene_presence
 
-        # stores values to show in plotly plot
-        if gene_presence >= 0.95:
-            genes_95 += 1
-        if gene_presence >= 0.99:
-            genes_99 += 1
-        if gene_presence >= 0.995:
-            genes_995 += 1
+    # determine number of loci above each cgMLST threshold
+    cgMLST_95 = [k for k, v in genes_values.items() if v >= 0.95]
+    cgMLST_99 = [k for k, v in genes_values.items() if v >= 0.99]
+    cgMLST_995 = [k for k, v in genes_values.items() if v >= 0.995]
+    cgMLST_100 = [k for k, v in genes_values.items() if v >= 1.0]
 
-        if len(genomes) > 500:
-            xthreshold = 0.95
-        elif len(genomes) < 20:
-            xthreshold = 0.90
-        # most of the times, it will be 0.95
-        else:
-            xthreshold = 0.95
+    vector = [len(genomes),
+              (cgMLST_95, len(cgMLST_95)),
+              (cgMLST_99, len(cgMLST_99)),
+              (cgMLST_995, len(cgMLST_995)),
+              (cgMLST_100, len(cgMLST_100)),
+              exclude_genomes]
 
-        # selects genes present in at least 95% of genomes
-        if gene_presence >= xthreshold:
-            # list that stores values to show in 'GENES_95%.txt'
-            present_genes.append(genes[column])
-            if int(gene_presence) == 1:
-                genes_100.append(genes[column])
-        elif gene_presence == 0:
-            genes_0.append(genes[column])
-
-        if gene_presence > xthreshold and len(genome_miss) > 0:
-            for genome in genome_miss:
-                # get identifiers of genomes that did not have the
-                # gene/locus
-                exclude_genomes.append(genome)
-
-        # we need to subtract 1 to total_rows shape because 'FILE'
-        # header is being included in genome list
-        totals.append(float(float((total_rows-1) - missing_genes) / float(total_rows-1)))
-        column += 1
-
-    counter = Counter(exclude_genomes)
-    most_common = counter.most_common()
-
-    exclude_genomes = [genome[0] for genome in most_common
-                       if int(genome[1]) > threshold]
-
-    # number of used genomes
-    vector[0].append(len(genomes))
-
-    # number of loci at 95%
-    vector[1].append(genes_95)
-
-    # number of loci at 99%
-    vector[2].append(genes_99)
-
-    # number of loci at 99.5%
-    vector[3].append(genes_995)
-
-    # number of loci at 0%
-    vector[4].append(len(genes_0))
-
-    # number of genomes to be removed
-    # if the sublist already has a value, sum the new value
-    try:
-        vector[5].append(len(exclude_genomes) + ((vector[5])[-1]))
-    # if it is empty just append
-    except Exception:
-        vector[5].append(len(exclude_genomes))
-
-    # number of loci at 100%
-    vector[6].append(len(genes_100))
-
-    return [exclude_genomes, vector, present_genes]
-
-
-def remove_genomes(matrix, rm_genomes):
-    """ Removes matrix rows corresponding to
-        genomes listed in the 'rm_genomes' argument.
-
-        Parameters
-        ----------
-        matrix : numpy.ndarray
-            Matrix with the profiles determined by
-            the AlleleCall process (accepts original or
-            presence/absence matrix).
-        rm_genomes : list
-            Identifiers of genomes whose rows will be removed.
-
-        Returns
-        -------
-        prunned_matrix : numpy.ndarray
-            Input matrix without the rows corresponding to genomes
-            listed in the 'rm_genomes' argument.
-    """
-
-    prunned_matrix = deepcopy(matrix)
-
-    genomes = (prunned_matrix[1:, :1]).tolist()
-
-    i = 0
-    for genome in genomes:
-        i += 1
-        if genome[0] in rm_genomes:
-            prunned_matrix = np.delete(prunned_matrix, i, axis=0)
-            i -= 1
-
-    return prunned_matrix
-
-
-def threshold_info(matrix, iterations, threshold):
-    """ Applies an iterative approach to determine stable
-        values for the number of genes present in 0%, 95%, 99%,
-        99.5% and 100% of genomes, excluding the genomes that
-        have a number of missing genes greater than a defined
-        threshold.
-
-        Parameters
-        ----------
-        matrix : numpy.ndarray
-            Matrix with the profiles determined by the AlleleCall
-            process in the format of a presence/absence matrix.
-        iterations : int
-            Maximum number of iterations that will be used to reach
-            stable values of genomes used and present genes.
-        threshold : int
-            Maximum acceptable number of missing genes. Genomes
-            with a number of missing genes greater that this
-            threshold will be excluded at each iteration.
-
-        Returns
-        -------
-        stats_vector : list
-            List with 7 sublists. The sublists will store
-            (in order): number of genomes included in the
-            calculation of present genes (respect the missing
-            genes threshold), number of genes present in 95%
-            of the genomes, number of genes present in
-            99% of the genomes, number of genes present in
-            99.5% of the genomes, number of genes present in
-            0% of the genomes, number of genomes excluded from
-            the analysis and number of genes present in 100%
-            of the genomes.
-        stable_iteration : int
-            The iteration at which the number of used genomes
-            and present genes stabilized.
-        removed_genomes : list
-            Genomes excluded from the analysis at the current
-            threshold.
-        iterations_genes : list
-            Identifiers of genes that are present in 95% of the
-            genomes.
-    """
-
-    i = 0
-    removed_genomes = []
-    genomes_to_remove = []
-
-    stats_vector = [[] for x in range(7)]
-
-    stable = False
-    present_genes = []
-    iterations_genes = []
-    stable_iteration = None
-    removed_genomes_count = 0
-    while i <= iterations or not stable:
-
-        # genomes to remove because they had
-        # a number of missing loci greater than threshold
-        for g in genomes_to_remove:
-            removed_genomes.append(g)
-
-        # keep iterating if the number of genomes to remove keeps
-        # increasing
-        if len(removed_genomes) > removed_genomes_count and i > 0:
-            removed_genomes_count = len(removed_genomes)
-        elif stable_iteration is None and i > 0:
-            stable = True
-            stable_iteration = i
-            iterations_genes.append(present_genes)
-        if not stable:
-            # remove genomes rows from matrix and re-calculate
-            # the gene presence percentage
-            if len(genomes_to_remove) > 0:
-                matrix = remove_genomes(matrix, genomes_to_remove)
-
-            genomes_to_remove, stats_vector, present_genes = \
-                presence_absence_iterator(matrix,
-                                          threshold,
-                                          stats_vector)
-
-        # increment iterations
-        i += 1
-
-    return [stats_vector, stable_iteration,
-            removed_genomes, iterations_genes]
+    return [exclude_genomes, vector]
 
 
 def scatter_tracer(x_data, y_data, tracer_name, tracer_mode,
@@ -403,98 +155,43 @@ def scatter_tracer(x_data, y_data, tracer_name, tracer_mode,
     return tracer
 
 
-def main(input_file, max_iteration, missing_loci_threshold,
-         step, output_directory):
+input_file = '/home/rfm/Desktop/rfm/bugfixing/chewBBACA_tutorial/chewBBACA_tutorial_copy/cgMLST_all.tsv'
+missing_loci_threshold = 290
+step = 50
+output_directory = '/home/rfm/Desktop/rfm/bugfixing/chewBBACA_tutorial/chewBBACA_tutorial_copy/novel_TestGenomeQuality'
+def main(input_file, missing_loci_threshold, step, output_directory):
 
     # create output directory, if it does not exist
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
+    fo.create_directory(output_directory)
 
-    # define starting threshold
-    # starting with maximum number of missing loci of 0
-    threshold = 0
+    # import matrix with allelic profiles
+    matrix = pd.read_csv(input_file, header=0, index_col=0,
+                         sep='\t', low_memory=False)
+
+    # mask missing data
+    print('Masking missing data...', end='')
+    masked_matrix = matrix.apply(mm.replace_chars)
+    print('done.')
+
+    # build presence/absence matrix
+    print('Building presence and absence matrix...', end='')
+    presence_absence = mm.presAbs(masked_matrix, output_directory)
+    print('done.')
+
+    # generate list with all threshold values
+    threshold_list = list(chain(range(0, missing_loci_threshold, step),
+                                [missing_loci_threshold]))
+
     results = []
-    stable_iterations = []
-    threshold_list = list(range(0, missing_loci_threshold+step, step))
+    for threshold in threshold_list:
+        print('\r', 'Determining core-genome for threshold '
+              '{0}/{1}'.format(threshold, threshold_list[-1]),
+              end='')
 
-    # store the list of genomes removed per threshold
-    removed_genomes_file = os.path.join(output_directory, 'removedGenomes.txt')
-    with open(removed_genomes_file, 'w') as rgf:
-        rgf.write('Threshold\tRemoved_genomes\n')
+        removed_genomes, vector = presence_absence_iterator(presence_absence,
+                                                            threshold)
 
-    # store the list of schema genes/loci per threshold
-    present_genes_file = os.path.join(output_directory, 'Genes_95%.txt')
-    with open(present_genes_file, 'w') as pgf:
-        pgf.write('Threshold\tPresent_genes\n')
-
-    print('\nImporting matrix and converting to Presence/Absence matrix...')
-    # read AlleleCall matrix
-    original_matrix = np.genfromtxt(input_file, delimiter='\t',
-                                    dtype=None, encoding=None)
-
-    # copy and work with copied version
-    copy_matrix = np.copy(original_matrix)
-    # create presence/absence matrix for easier processing
-    copy_matrix = presence_absence_matrix(copy_matrix)
-    print('Done.')
-
-    # determine genomes and genes for every threshold
-    print('\nMissing genes thresholds:'
-          '\nMinimun: {0}'
-          '\nMaximum: {1}'
-          '\nStep: {2}'.format(threshold, missing_loci_threshold, step))
-
-    print('\nDetermining number of genes present in '
-          '95%, 99%, 99.5% and 100% of genomes for all threshold values...\n')
-
-    print('-'*67)
-    print('{0:^9}  {1:^9}  {2:^7}  '
-          '{3:^7}  {4:^7}  {5:^8}  {6:^8}'.format('THRESHOLD',
-                                                  'ITERATION',
-                                                  'GENOMES',
-                                                  'GENES95',
-                                                  'GENES99',
-                                                  'GENES995',
-                                                  'GENES100'))
-    print('-'*67)
-
-    total_genomes = original_matrix.shape[0] - 1
-    while threshold <= missing_loci_threshold:
-
-        result, stable_iteration, removed_genomes, iterations_genes = threshold_info(copy_matrix,
-                                                                                     max_iteration,
-                                                                                     threshold)
-
-        stable_iterations.append(stable_iteration)
-
-        # print threshold line
-        print('{0:^9}  {1:^9}  {2:^7}  '
-              '{3:^7}  {4:^7}  {5:^8}  {6:^8}'.format(threshold,
-                                                      stable_iteration,
-                                                      total_genomes - len(removed_genomes),
-                                                      result[1][-1],
-                                                      result[2][-1],
-                                                      result[3][-1],
-                                                      result[6][-1]))
-
-        results.append(result)
-
-        # save results to files
-        with open(removed_genomes_file, 'a') as rgf:
-            rm_genomes_text = '{0}\t{1}\n'.format(threshold,
-                                                  ' '.join(map(str, removed_genomes)))
-            rgf.write(rm_genomes_text)
-
-        with open(present_genes_file, 'a') as pgf:
-            pgf.write('{0}\t'.format(threshold))
-
-            for x in iterations_genes:
-                pgf.write((' '.join(map(str, x))) + '\n')
-
-        # increment maximum number of missing loci
-        threshold += step
-
-    print('-'*67)
+        results.append(vector)
 
     # plot legend labels
     labels = ['Genomes used',
@@ -508,13 +205,13 @@ def main(input_file, max_iteration, missing_loci_threshold,
     x_data = threshold_list
 
     # number of genomes used per threshold
-    y_genomes = [res[0][-1] for res in results]
+    y_genomes = [res[0] for res in results]
     # number of genes per threshold and per
     # genome presence percentage
     y_95 = [res[1][-1] for res in results]
     y_99 = [res[2][-1] for res in results]
     y_995 = [res[3][-1] for res in results]
-    y_100 = [res[6][-1] for res in results]
+    y_100 = [res[4][-1] for res in results]
 
     # group all yaxis datasets into list
     y_datasets = [y_genomes, y_95, y_99, y_995, y_100]
@@ -549,7 +246,7 @@ def main(input_file, max_iteration, missing_loci_threshold,
 
     # define layout attributes
     fig_layout = go.Layout(title='Test genomes quality',
-                           xaxis=dict(title='Threshold',
+                           xaxis=dict(title='Missing loci threshold',
                                       showline=True,
                                       mirror=True,
                                       linecolor='#EBEBEB',
@@ -558,14 +255,16 @@ def main(input_file, max_iteration, missing_loci_threshold,
                                       showgrid=True,
                                       gridcolor='rgb(255,255,255)',
                                       range=[-5, missing_loci_threshold+5]),
-                           yaxis=dict(title='Number of loci',
+                           yaxis=dict(title='Number of loci<br>'
+                                            'in the core-genome',
                                       showline=True,
                                       linecolor='#EBEBEB',
                                       ticks='outside',
                                       tickcolor='#EBEBEB',
                                       showgrid=True,
                                       gridcolor='rgb(255,255,255)'),
-                           yaxis2=dict(title='Number of genomes',
+                           yaxis2=dict(title='Number of genomes used<br>'
+                                             'to determine the core-genome',
                                        showline=True,
                                        linecolor='#EBEBEB',
                                        ticks='outside',
@@ -579,7 +278,9 @@ def main(input_file, max_iteration, missing_loci_threshold,
 
     fig = go.Figure(data=tracers, layout=fig_layout)
     plot_file = os.path.join(output_directory, 'GenomeQualityPlot.html')
-    plotly.offline.plot(fig, filename=plot_file)
+    plotly.offline.plot(fig, filename=plot_file, auto_open=False)
+
+    print('\nResults available at: {0}'.format(output_directory))
 
 
 def parse_arguments():
@@ -590,13 +291,6 @@ def parse_arguments():
     parser.add_argument('-i', '--input-file', type=str,
                         required=True, dest='input_file',
                         help='Raw allele call matrix file (results_alleles.tsv).')
-
-    parser.add_argument('-n', '--max-iteration', type=int,
-                        required=True, dest='max_iteration',
-                        help='Maximum number of iterations per threshold. '
-                             'Several iterations might be necessary to get '
-                             'stable values for the number of present genes '
-                             'and number of genomes used.')
 
     parser.add_argument('-t', '--missing-loci-threshold', type=int,
                         required=True, dest='missing_loci_threshold',
