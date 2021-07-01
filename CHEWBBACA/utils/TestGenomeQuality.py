@@ -9,8 +9,8 @@ assembly on the number of loci that constitute the core-genome. The
 impact of each genome is evaluated based on a threshold of missing
 loci that is progressively increased to include genomes with more
 missing loci and determine the impact of the inclusion of those genomes
-in the core-genome. The process reports the number of loci that constitute
-the core-genome at several thresholds of loci presence.
+in the core-genome. The process can report the number of loci that
+constitute the core-genome at several thresholds of loci presence.
 
 Code documentation
 ------------------
